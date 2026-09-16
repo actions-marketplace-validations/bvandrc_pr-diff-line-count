@@ -1,0 +1,32 @@
+{
+  "name": "pr-code-lines",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Count the code lines a pull request changes, with comments, blank lines, tests and generated files separated.",
+  "license": "MIT",
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node24 --format=cjs --outfile=dist/index.cjs",
+    "format": "npx biome check . --fix",
+    "lint": "npx biome check .",
+    "ts:check": "tsc",
+    "test:unit": "vitest run",
+    "check": "npm run ts:check && npm run lint",
+    "cloc:check": "tsx script/check-cloc-version.ts"
+  },
+  "dependencies": {
+    "@actions/core": "^3",
+    "@actions/exec": "^3",
+    "@actions/github": "^9",
+    "@actions/tool-cache": "^4",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2",
+    "@types/node": "^22",
+    "esbuild": "^0.28",
+    "tsx": "^4",
+    "typescript": "^7",
+    "vitest": "^5"
+  }
+}

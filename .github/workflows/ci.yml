@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: Lint & Types
+    runs-on: ubuntu-latest
+    steps:
+      # checkout stays in each job: a local composite action is read from the
+      # workspace, so it cannot run until the repo is on disk.
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: npm run check
+
+  unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: npm run test:unit
+
+  bundle:
+    name: Bundle Current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+
+      # A JS action runs the committed bundle, so a dist/ that lags behind src/
+      # ships the old behaviour while the diff shows the new one. Rebuild and
+      # fail if anything moved.
+      - name: Verify dist/ is current
+        run: |
+          npm run build
+          if ! git diff --exit-code --stat -- dist; then
+            echo "::error::dist/ is out of date -- run 'npm run build' and commit the result."
+            exit 1
+          fi
