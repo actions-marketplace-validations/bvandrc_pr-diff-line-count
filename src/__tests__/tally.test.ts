@@ -1,0 +1,192 @@
+import { mapValues } from 'es-toolkit'
+import type { PartialDeep } from 'type-fest'
+import { describe, expect, it } from 'vitest'
+
+import type { ClocDiffReport } from '../cloc/run.ts'
+import {
+  type CategoryGlobs,
+  DEFAULT_CATEGORY_GLOBS,
+  type DiffTally,
+  FILE_CATEGORIES,
+  tallyDiff,
+} from '../tally.ts'
+
+/** Builds the `--by-file` shape from just the entries a case cares about. */
+const clocReport = (sections: PartialDeep<ClocDiffReport>): ClocDiffReport =>
+  mapValues(sections, (files) =>
+    mapValues(files ?? {}, (c) => ({ code: 0, comment: 0, blank: 0, ...c }))
+  )
+
+/** Each category's added code, which is what most of these cases turn on. */
+const codePerCategory = (tally: DiffTally) =>
+  mapValues(tally.byCategory, (t) => t.added.code)
+
+const GLOBS = {
+  tests: ['**/__tests__/**', '**/*.test.*', '**/*.spec.*'],
+  generated: ['**/package-lock.json', '**/migrations/**'],
+  docs: ['**/*.md'],
+  config: ['**/*.json', '**/*.yml'],
+} as const satisfies CategoryGlobs
+
+describe('tallyDiff', () => {
+  it('totals correctly', () => {
+    const tally = tallyDiff(
+      clocReport({
+        added: {
+          'src/thing.ts': { code: 10, comment: 40, blank: 3 },
+          'src/thing2.ts': { code: 10, comment: 40, blank: 3 },
+        },
+      }),
+      GLOBS
+    )
+
+    expect(tally.total.added).toEqual({ code: 20, comment: 80, blank: 6 })
+  })
+
+  it('routes each path to its category, and anything unmatched to source', () => {
+    const tally = tallyDiff(
+      clocReport({
+        added: {
+          'src/thing.ts': { code: 5 },
+          'src/__tests__/thing.ts': { code: 30, comment: 40, blank: 3 },
+          'e2e/login.spec.ts': { code: 20 },
+          'package-lock.json': { code: 900, comment: 1 },
+          'db/migrations/0007_add_schedule.sql': { code: 12, blank: 3 },
+          'README.md': { code: 4 },
+          Makefile: { code: 3 },
+        },
+      }),
+      GLOBS
+    )
+
+    // `Makefile` matches no glob, so it lands in source alongside thing.ts.
+    expect(codePerCategory(tally)).toEqual({
+      source: 8,
+      tests: 50,
+      generated: 912,
+      docs: 4,
+      config: 0,
+    })
+  })
+
+  it('lets the first matching category win', () => {
+    const tally = tallyDiff(
+      clocReport({
+        added: { 'db/migrations/__tests__/seed.test.ts': { code: 9 } },
+      }),
+      GLOBS
+    )
+
+    expect(codePerCategory(tally)).toEqual({
+      source: 0,
+      tests: 9,
+      generated: 0,
+      docs: 0,
+      config: 0,
+    })
+  })
+
+  it('matches dotfile directories, which a default glob would skip', () => {
+    const tally = tallyDiff(
+      clocReport({ added: { '.github/workflows/ci.yml': { code: 20 } } }),
+      {
+        ...GLOBS,
+        config: ['**/.github/**'],
+      }
+    )
+
+    expect(tally.byCategory.config.added.code).toBe(20)
+    expect(tally.byCategory.source.added.code).toBe(0)
+  })
+
+  it("ignores cloc's SUM and header siblings of the per-file entries", () => {
+    const tally = tallyDiff(
+      clocReport({
+        added: {
+          'src/a.ts': { code: 5 },
+          SUM: { code: 5 },
+          header: { code: 99 },
+        },
+      }),
+      GLOBS
+    )
+
+    expect(tally.total.added.code).toBe(5)
+  })
+
+  it('reports every category, zeroed where the diff touched nothing', () => {
+    const tally = tallyDiff(
+      clocReport({ added: { 'src/a.ts': { code: 2 } } }),
+      GLOBS
+    )
+
+    // A caller reading one category never has to tell 0 from a missing key.
+    expect(codePerCategory(tally)).toEqual({
+      source: 2,
+      tests: 0,
+      generated: 0,
+      docs: 0,
+      config: 0,
+    })
+  })
+
+  it('sums each change kind separately', () => {
+    const FILE = 'src/a.ts'
+    const tally = tallyDiff(
+      clocReport({
+        added: { [FILE]: { code: 5 } },
+        modified: { [FILE]: { code: 3 } },
+        removed: { [FILE]: { code: 4 } },
+      }),
+      GLOBS
+    )
+
+    expect([
+      tally.total.added.code,
+      tally.total.modified.code,
+      tally.total.removed.code,
+    ]).toEqual([5, 3, 4])
+  })
+})
+
+describe('the shipped patterns', () => {
+  // Not a test of glob matching: each case pins one pattern in our own list,
+  // and the .json pair pins the precedence between two of them. Driven by the
+  // constant the action runs on, so a case is a claim about what users get.
+  const categoryOf = (file: string) => {
+    const tally = tallyDiff(
+      clocReport({ added: { [file]: { code: 1 } } }),
+      DEFAULT_CATEGORY_GLOBS
+    )
+    return FILE_CATEGORIES.find(
+      (category) => tally.byCategory[category].added.code > 0
+    )
+  }
+
+  it.each([
+    // The fallback: an extensionless file and a language nothing here names.
+    ['Makefile', 'source'],
+    ['src/main/kotlin/App.kt', 'source'],
+    ['client/src/lib/__tests__/storage.test.ts', 'tests'],
+    ['playwright/e2e/tasks.spec.ts', 'tests'],
+    ['pkg/thing_test.go', 'tests'],
+    ['src/test/java/AppTest.java', 'tests'],
+    ['tests/conftest.py', 'tests'],
+    // Also the precedence pair with tsconfig.json below: both are `**/*.json`,
+    // and generated is matched before config.
+    ['package-lock.json', 'generated'],
+    ['go.sum', 'generated'],
+    ['migrations/0007_add_task_schedule.sql', 'generated'],
+    ['api/service.pb.go', 'generated'],
+    ['public/app.min.js', 'generated'],
+    ['README.md', 'docs'],
+    ['docs/architecture.adoc', 'docs'],
+    ['LICENSE', 'docs'],
+    ['tsconfig.json', 'config'],
+    ['.github/workflows/ci.yml', 'config'],
+    ['Dockerfile', 'config'],
+    ['infra/prod.tfvars', 'config'],
+  ])('classifies %s as %s', (file, expected) => {
+    expect(categoryOf(file)).toBe(expected)
+  })
+})

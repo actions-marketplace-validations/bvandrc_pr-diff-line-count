@@ -1,6 +1,6 @@
 /**
- * @fileoverview Action entrypoint: counts the resolved range with cloc and
- * exposes the per-file result as an output.
+ * @fileoverview Action entrypoint: counts the resolved range with cloc, sorts
+ * the changed files into categories, and exposes the tally as one output.
  */
 
 import { tmpdir } from 'node:os'
@@ -10,6 +10,7 @@ import { context } from '@actions/github'
 
 import { runClocDiff } from './cloc/run.ts'
 import { resolveShaRange } from './sha.ts'
+import { DEFAULT_CATEGORY_GLOBS, tallyDiff } from './tally.ts'
 
 async function run(): Promise<void> {
   const pullRequest = context.payload.pull_request
@@ -25,7 +26,7 @@ async function run(): Promise<void> {
     reportPath: join(tmpdir(), 'pr-code-lines.json'),
   })
 
-  setOutput('json', JSON.stringify(report))
+  setOutput('json', JSON.stringify(tallyDiff(report, DEFAULT_CATEGORY_GLOBS)))
 }
 
 run().catch((error: unknown) => {

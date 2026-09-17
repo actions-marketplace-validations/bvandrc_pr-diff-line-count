@@ -8,6 +8,7 @@ import { info } from '@actions/core'
 import { exec } from '@actions/exec'
 import { z } from 'zod'
 
+import type { OmitIndexSignatureDeep } from '../utils/type-utils.ts'
 import { downloadCloc } from './download.ts'
 
 export const CHANGE_KINDS = ['added', 'modified', 'removed'] as const
@@ -43,9 +44,20 @@ const clocDiffReportSchema = z
   })
   .loose()
 
-/** One cloc tally. `nFiles` is always 0 in `--by-file` mode, so it goes unread. */
-export type ClocCounts = z.infer<typeof clocCountsSchema>
-export type ClocDiffReport = z.infer<typeof clocDiffReportSchema>
+/** One cloc tally, as the counts the schema names and nothing more. */
+export type ClocCounts = OmitIndexSignatureDeep<
+  z.infer<typeof clocCountsSchema>
+>
+
+/**
+ * cloc's `--diff --by-file --json` shape: a section per change kind, each
+ * keyed by repo-relative path. Derived from the schema, so the two cannot
+ * drift, with cloc's `same` and `header` siblings left out -- they are parsed
+ * and ignored, not part of what we hand on.
+ */
+export type ClocDiffReport = OmitIndexSignatureDeep<
+  z.infer<typeof clocDiffReportSchema>
+>
 
 async function assertPerl(): Promise<void> {
   const code = await exec('perl', ['--version'], {

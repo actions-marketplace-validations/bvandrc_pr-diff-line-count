@@ -1,5 +1,5 @@
 name: PR Code Lines
-description: Count the code lines a pull request changes, with comments and blank lines separated.
+description: Count the code lines a pull request changes, with comments, blank lines, tests, generated files, docs, and config tallied separately.
 author: bvandrc
 
 branding:
@@ -16,7 +16,7 @@ inputs:
 
 outputs:
   json:
-    description: cloc's per-file diff, as `{added,modified,removed,same}` keyed by repo-relative path, each holding `{code,comment,blank}`.
+    description: Every count, as `{byCategory,total}` -- see the README.
 
 runs:
   using: node24
