@@ -1,0 +1,5 @@
+# pnpm runs a dependency's install script only when it is named here, and
+# fails the install rather than skipping a script nobody has ruled on.
+# esbuild's links the platform binary it fetches as an optional dependency.
+allowBuilds:
+  esbuild: true
