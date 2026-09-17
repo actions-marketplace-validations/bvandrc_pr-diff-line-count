@@ -4,31 +4,57 @@ GitHub tells you a pull request is `+329 −144`. That number counts every line 
 
 This action recounts the same range with [cloc](https://github.com/AlDanial/cloc), which parses comments per language rather than guessing at them, and sorts the changed files into **source**, **tests**, **generated**, **docs**, and **config**.
 
-It renders that as a table for the job summary, and hands it back as an output:
+The result comes back three ways:
+
+- one sticky pull request comment (optional, and edited in place rather than added to on every push)
+- action outputs (counts that can be gated on)
+- a job summary table
+
+The comment, and the summary table with it:
 
 ```md
 ### PR code lines
 
 **Source code: +91 / ~68 / −9**  ·  GitHub reports +329 / −144
 
-| | + code | ~ code | − code | + comment | − comment |
-| --- | --: | --: | --: | --: | --: |
-| Source | 91 | 68 | 9 | 106 | 42 |
-| Tests | 12 | 0 | 0 | 4 | 0 |
-| Docs | 6 | 0 | 0 | 0 | 0 |
-| Config | 8 | 0 | 0 | 0 | 0 |
-| **Total** | 117 | 68 | 9 | 110 | 42 |
+|           | + code | ~ code | − code | + comment | − comment |
+| --------- | -----: | -----: | -----: | --------: | --------: |
+| Source    |     91 |     68 |      9 |       106 |        42 |
+| Tests     |     12 |      0 |      0 |         4 |         0 |
+| Docs      |      6 |      0 |      0 |         0 |         0 |
+| Config    |      8 |      0 |      0 |         0 |         0 |
+| **Total** |    117 |     68 |      9 |       110 |        42 |
 ```
 
 91 lines of source code, next to GitHub's +329.
-
-> **Status**: this release counts, categorises, and renders. It needs no more than `contents: read`, because nothing writes back to the pull request yet — posting the table as a sticky comment lands next.
 
 ## Usage
 
 ```yaml
 on: pull_request
 
+permissions:
+  contents: read
+  pull-requests: write # the table is posted as a sticky comment
+
+jobs:
+  count:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # REQUIRED! The merge base has to be in the clone.
+
+      - uses: bvandrc/pr-code-lines@v1
+```
+
+The action counts from the **merge base** of the two revisions, not from the base branch's tip, so a pull request isn't billed for commits that landed on the base after it forked.
+
+### Without the comment
+
+`pull-requests: write` is needed only to post the comment. Set `comment: false` and the action needs nothing beyond `contents: read`, still writing the table to the job summary and still returning the outputs:
+
+```yaml
 permissions:
   contents: read
 
@@ -38,25 +64,40 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # both ends of the range have to be in the clone
+          fetch-depth: 0 # REQUIRED! The merge base has to be in the clone.
 
-      - id: lines
-        uses: bvandrc/pr-code-lines@v1
+      - uses: bvandrc/pr-code-lines@v1
+        id: lines
+        with:
+          comment: false
 
-      - run: echo '${{ fromJSON(steps.lines.outputs.json).byCategory.source.added.code }} lines of source code'
+      - name: Publish the count to the steps that follow
+        env:
+          SOURCE_ADDED: ${{ fromJSON(steps.lines.outputs.json).byCategory.source.added.code }}
+        run: echo "SOURCE_ADDED=$SOURCE_ADDED" >> "$GITHUB_ENV"
+
+      - run: echo "$SOURCE_ADDED lines of source code"
+
+      - name: Fail if there is too much new source to review
+        if: env.SOURCE_ADDED > 400
+        run: |
+          echo "::error::Over $SOURCE_ADDED lines of new source code -- split this pull request."
+          exit 1
 ```
 
-`fetch-depth: 0` is required. The action counts from the **merge base** of the two revisions, not from the base branch's tip, so a PR isn't billed for commits that landed on the base after it forked — and a shallow clone doesn't have that commit.
+CI here runs that path on every pull request, under `contents: read` alone, so it stays working.
 
 ## Inputs
 
-| Input | Default | Purpose |
-| --- | --- | --- |
-| `title` | `PR code lines` | Heading on the job summary and the rendered table. |
-| `base-sha` | the PR's base | Revision to count from. The merge base of the two is what gets counted. |
-| `head-sha` | the PR's head | Revision to count to. |
+| Input          | Default               | Purpose                                                                                  |
+| -------------- | --------------------- | ---------------------------------------------------------------------------------------- |
+| `github-token` | `${{ github.token }}` | Token used to post the comment. Needs `pull-requests: write`.                            |
+| `comment`      | `true`                | Post the table as a sticky comment. Set `false` to use only the outputs and job summary. |
+| `title`        | `PR code lines`       | Heading on the comment and the job summary.                                              |
+| `base-sha`     | the PR's base         | Revision to count from. The merge base of the two is what gets counted.                  |
+| `head-sha`     | the PR's head         | Revision to count to.                                                                    |
 
-Set both to run outside a `pull_request` event.
+Set both to run outside a `pull_request` event. The comment is skipped when there's no pull request to post it to.
 
 ## Reading the table
 

@@ -1,17 +1,25 @@
 /**
  * @fileoverview Action entrypoint: counts the resolved range with cloc, sorts
- * the changed files into categories, and reports the tally as outputs and a
- * job summary.
+ * the changed files into categories, and reports the tally as outputs, a job
+ * summary and a pull request comment.
  */
 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { getInput, info, setFailed, setOutput, summary } from '@actions/core'
+import {
+  getBooleanInput,
+  getInput,
+  info,
+  setFailed,
+  setOutput,
+  summary,
+} from '@actions/core'
 import { context } from '@actions/github'
 
 import { runClocDiff } from './cloc/run.ts'
 import { githubDiffTotalsSchema, renderMarkdown } from './markdown.ts'
 import { resolveShaRange } from './sha.ts'
+import { postStickyComment } from './sticky-comment.ts'
 import { DEFAULT_CATEGORY_GLOBS, tallyDiff } from './tally.ts'
 
 async function run(): Promise<void> {
@@ -42,6 +50,10 @@ async function run(): Promise<void> {
   setOutput('json', JSON.stringify(tally))
 
   await summary.addRaw(markdown).write()
+
+  if (getBooleanInput('comment')) {
+    await postStickyComment({ body: markdown })
+  }
 }
 
 run().catch((error: unknown) => {
