@@ -6,7 +6,7 @@
  * config.
  */
 
-import { zipObject } from 'es-toolkit'
+import { partition, zipObject } from 'es-toolkit'
 import picomatch from 'picomatch'
 
 import {
@@ -21,7 +21,13 @@ const NON_SOURCE_CATEGORIES = ['tests', 'generated', 'docs', 'config'] as const
 export const FILE_CATEGORIES = ['source', ...NON_SOURCE_CATEGORIES] as const
 export type FileCategory = (typeof FILE_CATEGORIES)[number]
 
-/** Globs deciding what is what. Anything matching none of them counts as source. */
+/**
+ * Globs deciding what is what.
+ *
+ * Anything matching none of them counts as source. A `!`-prefixed glob excludes
+ * a path the rest of its category matched, which is how a broad extension keeps
+ * the exceptions that are not really that kind.
+ */
 export type CategoryGlobs = Record<
   (typeof NON_SOURCE_CATEGORIES)[number],
   string[]
@@ -36,67 +42,174 @@ export type DiffTally = {
 }
 
 /**
- * The globs each category is decided by. Not configurable yet -- a workflow
- * gets these or nothing, which keeps the categories comparable across repos
- * until someone needs otherwise.
+ * The `.txt` paths a machine reads, which the broad `.txt` glob would otherwise
+ * hand to docs.
+ *
+ * `config` claims them and `docs` excludes them from this one list, so the two
+ * cannot drift into a file being both or neither.
+ */
+const CONFIG_TXT_GLOBS = [
+  // Python
+  '**/requirements*.txt',
+  '**/requirements/**',
+  '**/constraints*.txt',
+  '**/runtime.txt',
+  // Web
+  '**/robots.txt',
+  '**/llms*.txt',
+  // C and C++
+  '**/CMakeLists.txt',
+]
+
+const excluding = (globs: string[]) => globs.map((glob) => `!${glob}`)
+
+/**
+ * The globs each category is decided by.
+ *
+ * Not configurable yet -- a workflow gets these or nothing, which keeps the
+ * categories comparable across repos until someone needs otherwise.
  */
 export const DEFAULT_CATEGORY_GLOBS = {
   tests: [
+    // Any language
     '**/__tests__/**',
     '**/__mocks__/**',
+    '**/__fixtures__/**',
+    '**/testdata/**',
     '**/test/**',
     '**/tests/**',
     '**/spec/**',
+    '**/mocks/**',
     '**/*.test.*',
     '**/*.spec.*',
     '**/*_test.*',
     '**/*_spec.*',
+    // JavaScript and TypeScript -- e2e suites, whose helpers and page objects
+    // carry no `.spec` suffix
+    '**/playwright/**/*.{ts,tsx,js,jsx}',
+    '**/cypress/**/*.{ts,tsx,js,jsx}',
+    // Python
+    '**/test_*.py',
+    '**/conftest.py',
+    // Java, Kotlin, and C#
     '**/*Test.*',
     '**/*Tests.*',
-    '**/conftest.py',
+    '**/*Spec.*',
+    '**/*IT.java',
+    // C and C++
+    '**/*_unittest.*',
   ],
   generated: [
+    // Any language -- lockfiles
+    '**/*.lock',
     '**/package-lock.json',
-    '**/yarn.lock',
     '**/pnpm-lock.yaml',
     '**/bun.lockb',
-    '**/Cargo.lock',
-    '**/poetry.lock',
-    '**/Gemfile.lock',
-    '**/composer.lock',
     '**/go.sum',
+    '**/.terraform.lock.hcl',
+    // Any language -- build output, vendored code, etc.
     '**/dist/**',
     '**/build/**',
+    '**/target/**',
     '**/vendor/**',
+    '**/node_modules/**',
+    '**/coverage/**',
     '**/migrations/**',
     '**/__snapshots__/**',
+    '**/*.generated.*',
+    // Web
     '**/*.min.js',
     '**/*.min.css',
-    '**/*.generated.*',
-    '**/*.pb.go',
+    '**/.next/**',
+    '**/*.tsbuildinfo',
+    // Python
     '**/*_pb2.py',
+    '**/*_pb2.pyi',
+    '**/*_pb2_grpc.py',
+    '**/*.egg-info/**',
+    '**/__pycache__/**',
+    // Dart
     '**/*.g.dart',
     '**/*.freezed.dart',
+    // Go
+    '**/*.pb.go',
+    '**/*_gen.go',
+    '**/zz_generated*.go',
+    // Java and Kotlin -- the Gradle wrapper is committed but written by Gradle
+    '**/gradle/wrapper/**',
+    '**/gradlew',
+    '**/gradlew.bat',
+    // C and C++
+    '**/CMakeFiles/**',
+    '**/*.pb.cc',
+    '**/*.pb.h',
+    // C#
+    '**/obj/**',
+    // Swift and Objective-C
+    '**/Pods/**',
+    '**/*.pbxproj',
+    // Elixir
+    '**/_build/**',
   ],
   docs: [
+    // Any language
     '**/*.md',
     '**/*.mdx',
     '**/*.rst',
     '**/*.adoc',
     '**/*.txt',
+    ...excluding(CONFIG_TXT_GLOBS),
     '**/docs/**',
     '**/LICENSE*',
   ],
   config: [
+    // Any language
     '**/*.json',
     '**/*.yml',
     '**/*.yaml',
     '**/*.toml',
     '**/*.ini',
     '**/*.cfg',
+    ...CONFIG_TXT_GLOBS, // The `.txt` settings docs hands over (grouped by language above)
+    // Any language -- editor, CI, container, and build tooling
     '**/.editorconfig',
     '**/.github/**',
     '**/Dockerfile*',
+    '**/Makefile*',
+    // Any language -- toolchain version pins
+    '**/.*-version',
+    '**/.nvmrc',
+    '**/.tool-versions',
+    // Python
+    '**/setup.py',
+    '**/Pipfile',
+    '**/MANIFEST.in',
+    // Go
+    '**/go.mod',
+    '**/go.work',
+    // Java and Kotlin
+    '**/pom.xml',
+    '**/*.gradle',
+    '**/*.gradle.kts',
+    '**/gradle.properties',
+    // C and C++
+    '**/*.cmake',
+    // C#
+    '**/*.csproj',
+    '**/*.sln',
+    '**/*.props',
+    '**/*.targets',
+    // Ruby
+    '**/Gemfile',
+    '**/Rakefile',
+    '**/*.gemspec',
+    // Swift and Objective-C
+    '**/Package.swift',
+    '**/Podfile',
+    '**/*.podspec',
+    // Elixir
+    '**/mix.exs',
+    // Terraform
     '**/*.tfvars',
   ],
 } as const satisfies CategoryGlobs
@@ -105,9 +218,10 @@ export const DEFAULT_CATEGORY_GLOBS = {
 const NON_FILE_KEYS = new Set(['SUM', 'header'])
 
 /**
- * The fields of a cloc count. The `emptyCounts` return annotation is what
- * keeps this list complete: drop one and the zeroed object stops satisfying
- * `ClocCounts`.
+ * The fields of a cloc count.
+ *
+ * The `emptyCounts` return annotation is what keeps this list complete: drop
+ * one and the zeroed object stops satisfying `ClocCounts`.
  */
 const COUNT_FIELDS = ['code', 'comment', 'blank'] as const
 
@@ -128,10 +242,32 @@ const addInto = (target: ClocCounts, source: ClocCounts) => {
   for (const field of COUNT_FIELDS) target[field] += source[field]
 }
 
+// Dotfiles match too, because plenty of real paths are under `.github/` or
+// `.config/` and a glob that silently skips them would undercount without
+// saying so.
+const MATCH_OPTIONS = { dot: true }
+
 /**
- * Sums a cloc diff into one tally per category. Every category is present
- * whether or not the diff touched it, so a caller reading one never has to
- * tell "no lines" apart from "key absent".
+ * Matches one category's globs, with a `!`-prefixed glob excluding a path the
+ * rest matched.
+ */
+const categoryMatcher = (globs: string[]) => {
+  // picomatch ORs an array, so a `!` glob left in one matches every path the
+  // others don't -- the two halves have to be run apart.
+  const [excluded, included] = partition(globs, (glob) => glob.startsWith('!'))
+  const isIncluded = picomatch(included, MATCH_OPTIONS)
+  const isExcluded = picomatch(
+    excluded.map((glob) => glob.slice(1)),
+    MATCH_OPTIONS
+  )
+  return (path: string) => isIncluded(path) && !isExcluded(path)
+}
+
+/**
+ * Sums a cloc diff into one tally per category.
+ *
+ * Every category is present whether or not the diff touched it, so a caller
+ * reading one never has to tell "no lines" apart from "key absent".
  */
 export function tallyDiff(
   report: ClocDiffReport,
@@ -139,15 +275,7 @@ export function tallyDiff(
 ): DiffTally {
   // First match wins, so a spec file under a generated directory is still a test.
   const matchers = NON_SOURCE_CATEGORIES.map(
-    (category) =>
-      [
-        category,
-        picomatch(globs[category], {
-          // because plenty of real paths are under `.github/` or `.config/` and a
-          // glob that silently skips them would undercount without saying so.
-          dot: true,
-        }),
-      ] as const
+    (category) => [category, categoryMatcher(globs[category])] as const
   )
   const byCategory = zipObject(
     [...FILE_CATEGORIES],

@@ -49686,7 +49686,8 @@ async function runClocDiff({
   baseSha,
   headSha,
   reportPath,
-  cwd
+  cwd,
+  ignoreWhitespace = false
 }) {
   await assertPerl();
   const clocPath = await downloadCloc();
@@ -49702,6 +49703,9 @@ async function runClocDiff({
       "--by-file",
       "--json",
       `--diff-timeout=${DIFF_TIMEOUT_SECONDS}`,
+      // cloc strips every whitespace character before comparing, not just the
+      // leading run -- the same as `git diff -w`.
+      ...ignoreWhitespace ? ["--ignore-whitespace"] : [],
       `--report-file=${reportPath}`
     ],
     {
@@ -49733,6 +49737,18 @@ ${errors.join("\n")}`
   return clocDiffReportSchema.parse(JSON.parse(raw));
 }
 
+// node_modules/.pnpm/es-toolkit@1.52.0/node_modules/es-toolkit/dist/array/partition.mjs
+function partition(arr, isInTruthy) {
+  const truthy = [];
+  const falsy = [];
+  for (let i = 0; i < arr.length; i++) {
+    const item = arr[i];
+    if (isInTruthy(item, i, arr)) truthy.push(item);
+    else falsy.push(item);
+  }
+  return [truthy, falsy];
+}
+
 // node_modules/.pnpm/es-toolkit@1.52.0/node_modules/es-toolkit/dist/array/zipObject.mjs
 function zipObject(keys, values) {
   const result = {};
@@ -49747,6 +49763,18 @@ function sum(nums) {
   return result;
 }
 
+// node_modules/.pnpm/es-toolkit@1.52.0/node_modules/es-toolkit/dist/object/mapValues.mjs
+function mapValues(object2, getNewValue) {
+  const result = {};
+  const keys = Object.keys(object2);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    const value = object2[key];
+    result[key] = getNewValue(value, key, object2);
+  }
+  return result;
+}
+
 // node_modules/.pnpm/es-toolkit@1.52.0/node_modules/es-toolkit/dist/object/pick.mjs
 function pick2(obj, keys) {
   const result = {};
@@ -49757,208 +49785,165 @@ function pick2(obj, keys) {
   return result;
 }
 
-// node_modules/.pnpm/markdown-table@3.0.4/node_modules/markdown-table/index.js
-function defaultStringLength(value) {
-  return value.length;
-}
-function markdownTable(table, options) {
-  const settings = options || {};
-  const align = (settings.align || []).concat();
-  const stringLength = settings.stringLength || defaultStringLength;
-  const alignments = [];
-  const cellMatrix = [];
-  const sizeMatrix = [];
-  const longestCellByColumn = [];
-  let mostCellsPerRow = 0;
-  let rowIndex = -1;
-  while (++rowIndex < table.length) {
-    const row3 = [];
-    const sizes2 = [];
-    let columnIndex2 = -1;
-    if (table[rowIndex].length > mostCellsPerRow) {
-      mostCellsPerRow = table[rowIndex].length;
-    }
-    while (++columnIndex2 < table[rowIndex].length) {
-      const cell = serialize(table[rowIndex][columnIndex2]);
-      if (settings.alignDelimiters !== false) {
-        const size = stringLength(cell);
-        sizes2[columnIndex2] = size;
-        if (longestCellByColumn[columnIndex2] === void 0 || size > longestCellByColumn[columnIndex2]) {
-          longestCellByColumn[columnIndex2] = size;
-        }
-      }
-      row3.push(cell);
-    }
-    cellMatrix[rowIndex] = row3;
-    sizeMatrix[rowIndex] = sizes2;
-  }
-  let columnIndex = -1;
-  if (typeof align === "object" && "length" in align) {
-    while (++columnIndex < mostCellsPerRow) {
-      alignments[columnIndex] = toAlignment(align[columnIndex]);
-    }
-  } else {
-    const code = toAlignment(align);
-    while (++columnIndex < mostCellsPerRow) {
-      alignments[columnIndex] = code;
-    }
-  }
-  columnIndex = -1;
-  const row2 = [];
-  const sizes = [];
-  while (++columnIndex < mostCellsPerRow) {
-    const code = alignments[columnIndex];
-    let before = "";
-    let after = "";
-    if (code === 99) {
-      before = ":";
-      after = ":";
-    } else if (code === 108) {
-      before = ":";
-    } else if (code === 114) {
-      after = ":";
-    }
-    let size = settings.alignDelimiters === false ? 1 : Math.max(
-      1,
-      longestCellByColumn[columnIndex] - before.length - after.length
-    );
-    const cell = before + "-".repeat(size) + after;
-    if (settings.alignDelimiters !== false) {
-      size = before.length + size + after.length;
-      if (size > longestCellByColumn[columnIndex]) {
-        longestCellByColumn[columnIndex] = size;
-      }
-      sizes[columnIndex] = size;
-    }
-    row2[columnIndex] = cell;
-  }
-  cellMatrix.splice(1, 0, row2);
-  sizeMatrix.splice(1, 0, sizes);
-  rowIndex = -1;
-  const lines = [];
-  while (++rowIndex < cellMatrix.length) {
-    const row3 = cellMatrix[rowIndex];
-    const sizes2 = sizeMatrix[rowIndex];
-    columnIndex = -1;
-    const line = [];
-    while (++columnIndex < mostCellsPerRow) {
-      const cell = row3[columnIndex] || "";
-      let before = "";
-      let after = "";
-      if (settings.alignDelimiters !== false) {
-        const size = longestCellByColumn[columnIndex] - (sizes2[columnIndex] || 0);
-        const code = alignments[columnIndex];
-        if (code === 114) {
-          before = " ".repeat(size);
-        } else if (code === 99) {
-          if (size % 2) {
-            before = " ".repeat(size / 2 + 0.5);
-            after = " ".repeat(size / 2 - 0.5);
-          } else {
-            before = " ".repeat(size / 2);
-            after = before;
-          }
-        } else {
-          after = " ".repeat(size);
-        }
-      }
-      if (settings.delimiterStart !== false && !columnIndex) {
-        line.push("|");
-      }
-      if (settings.padding !== false && // Don’t add the opening space if we’re not aligning and the cell is
-      // empty: there will be a closing space.
-      !(settings.alignDelimiters === false && cell === "") && (settings.delimiterStart !== false || columnIndex)) {
-        line.push(" ");
-      }
-      if (settings.alignDelimiters !== false) {
-        line.push(before);
-      }
-      line.push(cell);
-      if (settings.alignDelimiters !== false) {
-        line.push(after);
-      }
-      if (settings.padding !== false) {
-        line.push(" ");
-      }
-      if (settings.delimiterEnd !== false || columnIndex !== mostCellsPerRow - 1) {
-        line.push("|");
-      }
-    }
-    lines.push(
-      settings.delimiterEnd === false ? line.join("").replace(/ +$/, "") : line.join("")
-    );
-  }
-  return lines.join("\n");
-}
-function serialize(value) {
-  return value === null || value === void 0 ? "" : String(value);
-}
-function toAlignment(value) {
-  const code = typeof value === "string" ? value.codePointAt(0) : 0;
-  return code === 67 || code === 99 ? 99 : code === 76 || code === 108 ? 108 : code === 82 || code === 114 ? 114 : 0;
-}
-
 // src/tally.ts
 var import_picomatch = __toESM(require_picomatch2(), 1);
 var NON_SOURCE_CATEGORIES = ["tests", "generated", "docs", "config"];
 var FILE_CATEGORIES = ["source", ...NON_SOURCE_CATEGORIES];
+var CONFIG_TXT_GLOBS = [
+  // Python
+  "**/requirements*.txt",
+  "**/requirements/**",
+  "**/constraints*.txt",
+  "**/runtime.txt",
+  // Web
+  "**/robots.txt",
+  "**/llms*.txt",
+  // C and C++
+  "**/CMakeLists.txt"
+];
+var excluding = (globs) => globs.map((glob) => `!${glob}`);
 var DEFAULT_CATEGORY_GLOBS = {
   tests: [
+    // Any language
     "**/__tests__/**",
     "**/__mocks__/**",
+    "**/__fixtures__/**",
+    "**/testdata/**",
     "**/test/**",
     "**/tests/**",
     "**/spec/**",
+    "**/mocks/**",
     "**/*.test.*",
     "**/*.spec.*",
     "**/*_test.*",
     "**/*_spec.*",
+    // JavaScript and TypeScript -- e2e suites, whose helpers and page objects
+    // carry no `.spec` suffix
+    "**/playwright/**/*.{ts,tsx,js,jsx}",
+    "**/cypress/**/*.{ts,tsx,js,jsx}",
+    // Python
+    "**/test_*.py",
+    "**/conftest.py",
+    // Java, Kotlin, and C#
     "**/*Test.*",
     "**/*Tests.*",
-    "**/conftest.py"
+    "**/*Spec.*",
+    "**/*IT.java",
+    // C and C++
+    "**/*_unittest.*"
   ],
   generated: [
+    // Any language -- lockfiles
+    "**/*.lock",
     "**/package-lock.json",
-    "**/yarn.lock",
     "**/pnpm-lock.yaml",
     "**/bun.lockb",
-    "**/Cargo.lock",
-    "**/poetry.lock",
-    "**/Gemfile.lock",
-    "**/composer.lock",
     "**/go.sum",
+    "**/.terraform.lock.hcl",
+    // Any language -- build output, vendored code, etc.
     "**/dist/**",
     "**/build/**",
+    "**/target/**",
     "**/vendor/**",
+    "**/node_modules/**",
+    "**/coverage/**",
     "**/migrations/**",
     "**/__snapshots__/**",
+    "**/*.generated.*",
+    // Web
     "**/*.min.js",
     "**/*.min.css",
-    "**/*.generated.*",
-    "**/*.pb.go",
+    "**/.next/**",
+    "**/*.tsbuildinfo",
+    // Python
     "**/*_pb2.py",
+    "**/*_pb2.pyi",
+    "**/*_pb2_grpc.py",
+    "**/*.egg-info/**",
+    "**/__pycache__/**",
+    // Dart
     "**/*.g.dart",
-    "**/*.freezed.dart"
+    "**/*.freezed.dart",
+    // Go
+    "**/*.pb.go",
+    "**/*_gen.go",
+    "**/zz_generated*.go",
+    // Java and Kotlin -- the Gradle wrapper is committed but written by Gradle
+    "**/gradle/wrapper/**",
+    "**/gradlew",
+    "**/gradlew.bat",
+    // C and C++
+    "**/CMakeFiles/**",
+    "**/*.pb.cc",
+    "**/*.pb.h",
+    // C#
+    "**/obj/**",
+    // Swift and Objective-C
+    "**/Pods/**",
+    "**/*.pbxproj",
+    // Elixir
+    "**/_build/**"
   ],
   docs: [
+    // Any language
     "**/*.md",
     "**/*.mdx",
     "**/*.rst",
     "**/*.adoc",
     "**/*.txt",
+    ...excluding(CONFIG_TXT_GLOBS),
     "**/docs/**",
     "**/LICENSE*"
   ],
   config: [
+    // Any language
     "**/*.json",
     "**/*.yml",
     "**/*.yaml",
     "**/*.toml",
     "**/*.ini",
     "**/*.cfg",
+    ...CONFIG_TXT_GLOBS,
+    // The `.txt` settings docs hands over (grouped by language above)
+    // Any language -- editor, CI, container, and build tooling
     "**/.editorconfig",
     "**/.github/**",
     "**/Dockerfile*",
+    "**/Makefile*",
+    // Any language -- toolchain version pins
+    "**/.*-version",
+    "**/.nvmrc",
+    "**/.tool-versions",
+    // Python
+    "**/setup.py",
+    "**/Pipfile",
+    "**/MANIFEST.in",
+    // Go
+    "**/go.mod",
+    "**/go.work",
+    // Java and Kotlin
+    "**/pom.xml",
+    "**/*.gradle",
+    "**/*.gradle.kts",
+    "**/gradle.properties",
+    // C and C++
+    "**/*.cmake",
+    // C#
+    "**/*.csproj",
+    "**/*.sln",
+    "**/*.props",
+    "**/*.targets",
+    // Ruby
+    "**/Gemfile",
+    "**/Rakefile",
+    "**/*.gemspec",
+    // Swift and Objective-C
+    "**/Package.swift",
+    "**/Podfile",
+    "**/*.podspec",
+    // Elixir
+    "**/mix.exs",
+    // Terraform
     "**/*.tfvars"
   ]
 };
@@ -49975,16 +49960,19 @@ var emptyTally = () => zipObject(
 var addInto = (target, source) => {
   for (const field of COUNT_FIELDS) target[field] += source[field];
 };
+var MATCH_OPTIONS = { dot: true };
+var categoryMatcher = (globs) => {
+  const [excluded, included] = partition(globs, (glob) => glob.startsWith("!"));
+  const isIncluded = (0, import_picomatch.default)(included, MATCH_OPTIONS);
+  const isExcluded = (0, import_picomatch.default)(
+    excluded.map((glob) => glob.slice(1)),
+    MATCH_OPTIONS
+  );
+  return (path5) => isIncluded(path5) && !isExcluded(path5);
+};
 function tallyDiff(report, globs) {
   const matchers = NON_SOURCE_CATEGORIES.map(
-    (category) => [
-      category,
-      (0, import_picomatch.default)(globs[category], {
-        // because plenty of real paths are under `.github/` or `.config/` and a
-        // glob that silently skips them would undercount without saying so.
-        dot: true
-      })
-    ]
+    (category) => [category, categoryMatcher(globs[category])]
   );
   const byCategory = zipObject(
     [...FILE_CATEGORIES],
@@ -50002,6 +49990,21 @@ function tallyDiff(report, globs) {
   return { byCategory, total };
 }
 
+// src/utils/index.ts
+var typedEntries = (o) => Object.entries(o);
+var unbreakable = (text) => text.replaceAll(" ", "&nbsp;");
+var bold = (content) => `<strong>${content}</strong>`;
+var italic = (content) => `<em>${content}</em>`;
+var attrsStr = (attrs) => typedEntries(attrs).map(([name, value]) => ` ${name}="${value}"`).join("");
+var td = (content, attrs = {}) => `<td${attrsStr(attrs)}>${content}</td>`;
+var th = (content, attrs = {}) => `<th${attrsStr(attrs)}>${content}</th>`;
+var tr = (cells) => `<tr>${cells}</tr>`;
+var betweenBlankLines = (content) => `
+
+${content}
+
+`;
+
 // src/markdown.ts
 var CATEGORY_LABELS = {
   source: "Source",
@@ -50010,20 +50013,118 @@ var CATEGORY_LABELS = {
   docs: "Docs",
   config: "Config"
 };
+var COLUMN_KINDS = ["added", "removed", "net"];
+var foldModified = ({
+  modified,
+  ...tally
+}) => mapValues(
+  tally,
+  (counts) => mapValues(counts, (count, field) => count + modified[field])
+);
+var CHANGE_KIND_COLUMNS = {
+  added: {
+    sign: "+",
+    latex: "+",
+    color: "#2da44e"
+    // green
+  },
+  removed: {
+    sign: "\u2212",
+    latex: "-",
+    color: "#e5534b"
+    // red
+  },
+  net: {
+    sign: "\u0394",
+    latex: "\\Delta"
+  }
+};
+var COLUMN_GROUPS = [
+  "code",
+  "comment"
+];
+var COUNT_COLUMNS = COLUMN_GROUPS.flatMap(
+  (count) => COLUMN_KINDS.map((kind) => ({ kind, count }))
+);
+var COLUMN_COUNT = 1 + COUNT_COLUMNS.length;
 var githubDiffTotalsSchema = external_exports.object({
   additions: external_exports.number(),
   deletions: external_exports.number()
 });
 var hasAnyLine = (tally) => sum(CHANGE_KINDS.flatMap((kind) => Object.values(tally[kind]))) > 0;
-var row = (label, tally) => [
+var ZERO_COLOR = "#848d97";
+var readsAs = (kind, count) => {
+  if (kind === "net") return count > 0 ? "added" : "removed";
+  return kind;
+};
+var countColor = (kind, count) => count === 0 ? ZERO_COLOR : CHANGE_KIND_COLUMNS[readsAs(kind, count)].color;
+var columnCount = (folded, kind, count) => kind === "net" ? folded.added[count] - folded.removed[count] : folded[kind][count];
+var cellText = (kind, count, { latex }) => {
+  if (kind === "net" && count !== 0) {
+    const { sign, latex: latexSign } = CHANGE_KIND_COLUMNS[readsAs(kind, count)];
+    return `${latex ? latexSign : sign}${Math.abs(count)}`;
+  }
+  return `${count}`;
+};
+var coloredLatex = (color, body) => `\${\\color{${color}}${body}}$`;
+var boldLatex = (body) => `\\mathbf{${body}}`;
+var signedCount = (kind, count, { color }) => {
+  const { sign, latex } = CHANGE_KIND_COLUMNS[kind];
+  return color ? coloredLatex(countColor(kind, count), `${latex}${count}`) : `${sign}${count}`;
+};
+var linesChangedStr = ({
   label,
-  tally.added.code,
-  tally.modified.code,
-  tally.removed.code,
-  tally.added.comment,
-  tally.removed.comment
-].map(String);
-function renderMarkdown(tally, { githubTotals: ghTotals } = {}) {
+  added,
+  removed,
+  color = false
+}) => {
+  const counts = [
+    signedCount("added", added, { color }),
+    signedCount("removed", removed, { color })
+  ].join(" / ");
+  return color ? `${label} ${counts}` : unbreakable(`${label} ${counts}`);
+};
+var countCell = (kind, count, { emphasise = false, color }) => {
+  const text = cellText(kind, count, { latex: color });
+  return td(
+    color ? (
+      // A colored count is LaTeX, so it needs a blank line either side of it
+      // to be read as LaTeX at all -- see `betweenBlankLines`.
+      betweenBlankLines(
+        coloredLatex(
+          countColor(kind, count),
+          emphasise ? boldLatex(text) : text
+        )
+      )
+    ) : emphasise ? bold(text) : text,
+    { align: "right" }
+  );
+};
+var signCell = (kind, { color }) => {
+  const column = CHANGE_KIND_COLUMNS[kind];
+  const heading = "color" in column ? coloredLatex(column.color, column.latex) : `$${column.latex}$`;
+  return td(color ? betweenBlankLines(heading) : column.sign, {
+    align: "center"
+  });
+};
+var row = (label, tally, { boldCode = false, color }) => {
+  const folded = foldModified(tally);
+  return [
+    td(label),
+    ...COUNT_COLUMNS.map(
+      ({ kind, count }) => countCell(kind, columnCount(folded, kind, count), {
+        emphasise: boldCode && count === "code",
+        color
+      })
+    )
+    // A cell opened out over its own lines has to close before the next one
+    // starts, so the cells of a row go one per line rather than end to end.
+  ].join("\n");
+};
+function renderMarkdown(tally, {
+  githubTotals: ghTotals,
+  colorCounts = true
+} = {}) {
   const lines = ["### PR Diff Line Count"];
   const shown = FILE_CATEGORIES.filter(
     (category) => hasAnyLine(tally.byCategory[category])
@@ -50034,35 +50135,54 @@ function renderMarkdown(tally, { githubTotals: ghTotals } = {}) {
     );
     return lines.join("\n\n");
   }
-  const rows = shown.map(
-    (category) => row(CATEGORY_LABELS[category], tally.byCategory[category])
-  );
-  if (shown.length > 1) rows.push(row("**Total**", tally.total));
-  const source = tally.byCategory.source;
-  const ghTotalsStr = ghTotals ? ` &nbsp;\xB7&nbsp; GitHub reports +${ghTotals.additions} / \u2212${ghTotals.deletions}` : "";
+  const rows = shown.map((category) => {
+    const isSource = category === "source";
+    const label = CATEGORY_LABELS[category];
+    return row(isSource ? bold(label) : label, tally.byCategory[category], {
+      boldCode: isSource,
+      color: colorCounts
+    });
+  });
+  if (shown.length > 1)
+    rows.push(row(bold("Total"), tally.total, { color: colorCounts }));
+  if (ghTotals) {
+    const reported = linesChangedStr({
+      label: italic("GitHub reports"),
+      added: ghTotals.additions,
+      removed: ghTotals.deletions,
+      color: colorCounts
+    });
+    rows.push(
+      td(colorCounts ? betweenBlankLines(reported) : reported, {
+        colspan: COLUMN_COUNT,
+        align: "center"
+      })
+    );
+  }
   lines.push(
-    `**Source code: +${source.added.code} / ~${source.modified.code} / \u2212${source.removed.code}**${ghTotalsStr}`,
-    markdownTable(
-      [
+    [
+      "<table>",
+      // group header row: what each span of sign columns counts
+      tr(
+        td("") + COLUMN_GROUPS.map(
+          (count) => th(count, { colspan: COLUMN_KINDS.length, align: "center" })
+        ).join("")
+      ),
+      // sign header row, one cell under each column of its group
+      tr(
         [
-          // headers
-          "",
-          ...[
-            ["+", "code"],
-            ["~", "code"],
-            ["\u2212", "code"],
-            ["+", "comment"],
-            ["\u2212", "comment"]
-          ].map(([sign, label]) => `${sign}&nbsp;${label}`)
-        ],
-        // rows
-        ...rows
-      ],
-      // Counts read as columns of digits; only the labels want the left edge.
-      { align: ["l", "r", "r", "r", "r", "r"] }
-    ),
-    `<sub>\`~\` is a line changed in place \u2014 cloc counts it once rather than as an add plus a delete, so these columns do not sum to GitHub's.</sub>`,
-    `<sub>Blank lines are excluded above: +${tally.total.added.blank} / \u2212${tally.total.removed.blank}.</sub>`
+          td(""),
+          ...COUNT_COLUMNS.map(
+            ({ kind }) => signCell(kind, { color: colorCounts })
+          )
+        ].join("\n")
+      ),
+      ...rows.map(tr),
+      "</table>"
+    ].join("\n")
+  );
+  lines.push(
+    `<sub>${linesChangedStr({ label: "Blank lines are excluded above:", color: colorCounts, ...mapValues(foldModified(tally.total), ({ blank }) => blank) })}.</sub>`
   );
   return lines.join("\n\n");
 }
@@ -50145,13 +50265,15 @@ async function run() {
   const report = await runClocDiff({
     baseSha,
     headSha,
-    reportPath: (0, import_node_path2.join)((0, import_node_os.tmpdir)(), "pr-diff-line-count.json")
+    reportPath: (0, import_node_path2.join)((0, import_node_os.tmpdir)(), "pr-diff-line-count.json"),
+    ignoreWhitespace: getBooleanInput("ignore-whitespace")
   });
   const tally = tallyDiff(report, DEFAULT_CATEGORY_GLOBS);
   const markdown = renderMarkdown(tally, {
     // Present only on the pull_request event. The payload is typed `any`, so the
     // schema is what checks it -- and strips the other ~50 keys.
-    githubTotals: githubDiffTotalsSchema.safeParse(pullRequest).data
+    githubTotals: githubDiffTotalsSchema.safeParse(pullRequest).data,
+    colorCounts: getBooleanInput("color-counts")
   });
   setOutput("markdown", markdown);
   setOutput("json", JSON.stringify(tally));

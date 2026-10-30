@@ -1,7 +1,7 @@
 /**
  * @fileoverview Action entrypoint: counts the resolved range with cloc, sorts
  * the changed files into categories, and reports the tally as outputs, a job
- * summary and a pull request comment.
+ * summary, and a pull request comment.
  */
 
 import { tmpdir } from 'node:os'
@@ -34,6 +34,7 @@ async function run(): Promise<void> {
     baseSha,
     headSha,
     reportPath: join(tmpdir(), 'pr-diff-line-count.json'),
+    ignoreWhitespace: getBooleanInput('ignore-whitespace'),
   })
 
   const tally = tallyDiff(report, DEFAULT_CATEGORY_GLOBS)
@@ -42,6 +43,7 @@ async function run(): Promise<void> {
     // Present only on the pull_request event. The payload is typed `any`, so the
     // schema is what checks it -- and strips the other ~50 keys.
     githubTotals: githubDiffTotalsSchema.safeParse(pullRequest).data,
+    colorCounts: getBooleanInput('color-counts'),
   })
 
   setOutput('markdown', markdown)
